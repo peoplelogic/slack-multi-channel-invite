@@ -31,6 +31,30 @@ Simply set the optional `action` flag to `remove` (`add` is the default):
 
 `slack-multi-channel-invite -api_token=<user-oauth-token> -action=remove -emails=kd@warriors.com -channels=dubnation,warriors -private=<true|false>`
 
+## Using it with Github Actions
+
+You can also automate this using Github Actions and Github Secrets for your API key:
+```
+name: "ManageSlackUsers"
+on:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+    managing_users:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v3
+        - name: Setup go
+          uses: actions/setup-go@v3
+          with:
+            go-version: '1.18'
+        - run: go mod tidy
+        - run: go run main.go -private -api_token="${{ secrets.SLACK_API_KEY }}" -action $(cat users-list.txt | tail -n 1 | cut -d ':' -f 1) -emails "$(cat users-list.txt | tail -n 1 | cut -d ':' -f 2)" -channels "$(cat channels-list.txt | tail -n 1)"
+
+```
 
 ## Implementation
 Initially, I figured this script would be a simple loop that invoked some API to invite users to a channel.  It turns out this API endpoint ([`conversations.invite`](https://api.slack.com/methods/conversations.invite)) expects the user ID (instead of username) and channel ID (instead of channel name).  Problem is, it's not very straightforward to get user and channel IDs. There isn't a way to lookup a user by username (only by email).  And there's no way to look up a single channel, unless you have the channel ID already (chicken and egg).

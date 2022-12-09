@@ -8,7 +8,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
+
+	"golang.org/x/exp/maps"
 )
 
 const (
@@ -83,6 +86,7 @@ func main() {
 	var emails string
 	var channelsArg string
 	var private bool
+	var listChannels bool
 	var debug bool
 
 	// parse flags
@@ -91,10 +95,41 @@ func main() {
 	flag.StringVar(&emails, "emails", "", "Comma separated list of Slack user emails to invite")
 	flag.StringVar(&channelsArg, "channels", "", "Comma separated list of channels to invite users to")
 	flag.BoolVar(&private, "private", false, "Boolean flag to enable private channel invitations (requires OAuth scopes 'groups:read' and 'groups:write')")
+	flag.BoolVar(&listChannels, "list", false, "Boolean flag to list channels")
 	flag.BoolVar(&debug, "debug", false, "Enables debug logging when set to true")
 	flag.Parse()
 
-	if apiToken == "" || emails == "" || channelsArg == "" || (action != actionAdd && action != actionRemove) {
+	if apiToken == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// get all channels
+	channelNameToIDMap, err := getChannels(apiToken, private, debug)
+	if err != nil {
+		panic(err)
+	}
+
+	if listChannels {
+		fmt.Println("List of found channels (use -private to list private channels):")
+		keys := maps.Keys(channelNameToIDMap)
+		sort.Strings(keys)
+		max := 0
+		for _, k := range keys {
+			if len(k) > max {
+				max = len(k)
+			}
+		}
+		for _, k := range keys {
+			fmt.Printf("\t • %-*s  --> %s\n", max+3, k, channelNameToIDMap[k])
+		}
+	}
+
+	if emails == "" || channelsArg == "" || (action != actionAdd && action != actionRemove) {
+		if listChannels {
+			fmt.Println("Listing channels done, please use proper flags to perform actions.")
+			return
+		}
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -118,12 +153,6 @@ func main() {
 		return
 	}
 
-	// get all channels
-	channelNameToIDMap, err := getChannels(apiToken, private, debug)
-	if err != nil {
-		panic(err)
-	}
-
 	if debug {
 		fmt.Printf("DEBUG: Total # of channels retrieved: %d\n", len(channelNameToIDMap))
 	}
@@ -143,13 +172,13 @@ func main() {
 		}
 
 		if action == actionAdd {
-			err := inviteUsersToChannel(apiToken, userIDs, channelID)
+			err := inviteUsersToChannel(apiToken, userIDs, channelID, channel)
 			if err != nil {
 				fmt.Printf("Error while inviting users to %s (%s): %s\n", channel, channelID, err)
 				continue
 			}
 		} else {
-			err := removeUsersFromChannel(apiToken, userIDs, channelID, debug)
+			err := removeUsersFromChannel(apiToken, userIDs, channelID, channel, debug)
 			if err != nil {
 				fmt.Printf("Error while removing users from %s (%s): %s\n", channel, channelID, err)
 				continue
@@ -272,7 +301,7 @@ func getChannels(apiToken string, private bool, debug bool) (map[string]string, 
 	return nameToID, nil
 }
 
-func inviteUsersToChannel(apiToken string, userIDs []string, channelID string) error {
+func inviteUsersToChannel(apiToken string, userIDs []string, channelID, channelName string) error {
 	httpClient := &http.Client{}
 
 	reqBody, err := json.Marshal(conversationsInviteRequest{
@@ -312,6 +341,10 @@ func inviteUsersToChannel(apiToken string, userIDs []string, channelID string) e
 	}
 
 	if !data.Ok {
+		if data.Error == "already_in_channel" {
+			fmt.Println("User already in channel:", channelName)
+			return nil
+		}
 		fmt.Printf("conversationsInviteResponse: %+v\n", data)
 		return fmt.Errorf("Non-ok response while inviting user to channel")
 	}
@@ -319,8 +352,9 @@ func inviteUsersToChannel(apiToken string, userIDs []string, channelID string) e
 	return nil
 }
 
-func removeUsersFromChannel(apiToken string, userIDs []string, channelID string, debug bool) error {
+func removeUsersFromChannel(apiToken string, userIDs []string, channelID, channelName string, debug bool) error {
 	// API only supports removing users one at a time ...
+	fmt.Println("Removing users from channel:", channelName)
 	for _, userID := range userIDs {
 		err := removeUserFromChannel(apiToken, userID, channelID)
 		if err != nil {
