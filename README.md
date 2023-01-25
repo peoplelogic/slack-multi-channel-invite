@@ -20,11 +20,13 @@ Enjoy!
     - Else download the binary directly: https://github.com/jamietsao/slack-multi-channel-invite/releases
 5. Run script:
 
-`slack-multi-channel-invite -api_token=<user-oauth-token> -emails=steph@warriors.com,klay@warriors.com -channels=dubnation,splashbrothers,thetown -private=<true|false>`
+`slack-multi-channel-invite -api_token=<user-oauth-token> -emails=steph@warriors.com,klay@warriors.com -channels=dubnation,splashbrothers,thetown -private=<true|false> -list=<true|false>`
 
 The users with emails `steph@warriors.com` and `klay@warriors.com` should be invited to channels `dubnation`, `splashbrothers`, and `thetown`!
 
 _* Set `private` flag to `true` if you want to invite users to private channels.  As noted above, this will require the additional permission scopes of `groups:read` and `groups:write`_
+
+_* The behaviour of the `list` flag set to `true` depends on whether the `emails` is listing a set of emails or not. When `emails` is empty, it simply lists the available channels, including the private ones if `private` is also set to true. When `emails` is not empty instead it will list the channels that these users are part of, always including the private ones. This will also require the additional permission scopes of `groups:read` and `groups:write`._
 
 #### Want to remove users from channels?
 Simply set the optional `action` flag to `remove` (`add` is the default):
@@ -33,7 +35,7 @@ Simply set the optional `action` flag to `remove` (`add` is the default):
 
 ## Using it with Github Actions
 
-You can also automate this using Github Actions and Github Secrets for your API key:
+You can also automate this using Github Actions and [Github Secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets) for your API key:
 ```
 name: "ManageSlackUsers"
 on:
@@ -52,9 +54,22 @@ jobs:
           with:
             go-version: '1.18'
         - run: go mod tidy
-        - run: go run main.go -private -api_token="${{ secrets.SLACK_API_KEY }}" -action $(cat users-list.txt | tail -n 1 | cut -d ':' -f 1) -emails "$(cat users-list.txt | tail -n 1 | cut -d ':' -f 2)" -channels "$(cat channels-list.txt | tail -n 1)"
-
+        - run: go run main.go -private -api_token="${{ secrets.SLACK_API_KEY }}" -action "$(cat list.txt | tail -n 2 | head -n 1 | cut -d ':' -f 1)" -emails "$(cat list.txt | tail -n 2 | head -n 1 | cut -d ':' -f 2)" -channels "$(cat list.txt | tail -n 1)"
 ```
+which would read from the local file `list.txt` the last two lines and take actions accordingly. E.g. your file might look like:
+```
+Adding people to slack channel 
+add:someemail@example.com,otherone@test.com
+user-stories,lobby,secretchannel
+
+Now listing users
+list:
+user-stories
+```
+This would only execute the last two lines, and so it would list users in the channel `#user-stories`.
+This means you can now manage your Slack users using a Github action by simply editing the `list.txt` file in Github directly.
+
+Possible actions are: `add:`, `remove:` and `list:`.
 
 ## Implementation
 Initially, I figured this script would be a simple loop that invoked some API to invite users to a channel.  It turns out this API endpoint ([`conversations.invite`](https://api.slack.com/methods/conversations.invite)) expects the user ID (instead of username) and channel ID (instead of channel name).  Problem is, it's not very straightforward to get user and channel IDs. There isn't a way to lookup a user by username (only by email).  And there's no way to look up a single channel, unless you have the channel ID already (chicken and egg).

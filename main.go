@@ -12,16 +12,20 @@ import (
 	"strings"
 
 	"golang.org/x/exp/maps"
+	"golang.org/x/exp/slices"
 )
 
 const (
-	conversationsInviteURL = "https://slack.com/api/conversations.invite"
-	conversationsKickURL   = "https://slack.com/api/conversations.kick"
-	conversationsListURL   = "https://slack.com/api/conversations.list"
-	usersLookupByEmailURL  = "https://slack.com/api/users.lookupByEmail"
+	conversationsInviteURL   = "https://slack.com/api/conversations.invite"
+	conversationsKickURL     = "https://slack.com/api/conversations.kick"
+	conversationsListURL     = "https://slack.com/api/conversations.list"
+	conversationsUserListURL = "https://slack.com/api/conversations.members"
+	usersLookupByEmailURL    = "https://slack.com/api/users.lookupByEmail"
+	usersLookupByIdURL       = "https://slack.com/api/users.info"
 
 	actionAdd    = "add"
 	actionRemove = "remove"
+	actionList   = "list"
 )
 
 type (
@@ -30,8 +34,13 @@ type (
 		Channels         []channel        `json:"channels"`
 		ResponseMetadata responseMetadata `json:"response_metadata"`
 		Error            string           `json:error`
-		Needed           string           `json:needed`
-		Provided         string           `json:provided`
+	}
+
+	conversationsMembersResponse struct {
+		Ok               bool             `json:"ok"`
+		Members          []string         `json:"members"`
+		ResponseMetadata responseMetadata `json:"response_metadata"`
+		Error            string           `json:error`
 	}
 
 	channel struct {
@@ -63,17 +72,44 @@ type (
 		Error string `json:"error"`
 	}
 
-	usersLookupByEmailResponse struct {
+	usersLookupResponse struct {
 		Ok    bool   `json:"ok"`
 		User  user   `json:"user"`
 		Error string `json:"error"`
 	}
 
 	user struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		RealName string `json:"real_name"`
 	}
 )
+
+func getUsersIdsFrom(apiToken, emails string) []string {
+	userIDs := []string{}
+	var err error
+	for _, email := range strings.Split(emails, ",") {
+		var userID string
+		if strings.Contains(email, "@") {
+			userID, err = getUserID(apiToken, email)
+			if err != nil {
+				fmt.Printf("Error while looking up user with email %s: %s\n", email, err)
+				continue
+			}
+			fmt.Printf("Valid user (ID: %s) found for '%s'\n", userID, email)
+		} else {
+			userName, realName, err := getUserName(apiToken, email)
+			if err != nil {
+				fmt.Println("Invalid user provided:", email, err)
+				continue
+			}
+			userID = email
+			fmt.Printf("Valid user (ID: %s) provided for %s (%s)\n", userID, realName, userName)
+		}
+		userIDs = append(userIDs, userID)
+	}
+	return userIDs
+}
 
 // This script invites the given users to the given channels on Slack.
 // Due to the oddness of the Slack API, this is accomplished via these steps:
@@ -92,10 +128,10 @@ func main() {
 	// parse flags
 	flag.StringVar(&apiToken, "api_token", "", "Slack OAuth Access Token")
 	flag.StringVar(&action, "action", "add", "'add' to invite users, 'remove' to remove users")
-	flag.StringVar(&emails, "emails", "", "Comma separated list of Slack user emails to invite")
-	flag.StringVar(&channelsArg, "channels", "", "Comma separated list of channels to invite users to")
+	flag.StringVar(&emails, "emails", "", "Comma separated list of Slack user emails to invite, or user IDs")
+	flag.StringVar(&channelsArg, "channels", "", "Comma separated list of channels to invite users to, or to list users for")
 	flag.BoolVar(&private, "private", false, "Boolean flag to enable private channel invitations (requires OAuth scopes 'groups:read' and 'groups:write')")
-	flag.BoolVar(&listChannels, "list", false, "Boolean flag to list channels")
+	flag.BoolVar(&listChannels, "list", false, "Boolean flag to list channels, or list users in given channels if used with -channels")
 	flag.BoolVar(&debug, "debug", false, "Enables debug logging when set to true")
 	flag.Parse()
 
@@ -110,25 +146,82 @@ func main() {
 		panic(err)
 	}
 
+	if action == actionList {
+		listChannels = true
+	}
+
 	if listChannels {
-		fmt.Println("List of found channels (use -private to list private channels):")
-		keys := maps.Keys(channelNameToIDMap)
-		sort.Strings(keys)
-		max := 0
-		for _, k := range keys {
-			if len(k) > max {
-				max = len(k)
+		if channelsArg == "" && emails == "" {
+			fmt.Println("List of found channels (use -private to include private channels):")
+			keys := maps.Keys(channelNameToIDMap)
+			sort.Strings(keys)
+			max := 0
+			for _, k := range keys {
+				if len(k) > max {
+					max = len(k)
+				}
+			}
+			sb := &strings.Builder{}
+			for _, k := range keys {
+				fmt.Printf("\t • %-*s  --> %s\n", max+3, k, channelNameToIDMap[k])
+				fmt.Fprintf(sb, "%s,", k)
+			}
+			fmt.Println(sb.String())
+			return
+		} else if emails == "" {
+			channels := strings.Split(channelsArg, ",")
+			for _, channel := range channels {
+				channelID := channelNameToIDMap[channel]
+				if channelID == "" {
+					fmt.Printf("Channel '%s' not found -- skipping\n", channel)
+					continue
+				}
+				fmt.Println("Listing users for channel", channel)
+				users, err := getUsersById(apiToken, channelID, debug)
+				if err != nil {
+					fmt.Println("Error while listing users for channel", channel, err)
+					continue
+				}
+				max := 0
+				for _, v := range users {
+					if len(v) > max {
+						max = len(v)
+					}
+				}
+				sb := &strings.Builder{}
+				for _, v := range users {
+					name, realname, err := getUserName(apiToken, v)
+					if err != nil {
+						fmt.Println("Error while getting user name for", v)
+						continue
+					}
+					fmt.Printf("\t\t • %-*s --> %s (%s)\n", max+3, v, realname, name)
+					fmt.Fprintf(sb, "%s,", v)
+				}
+				fmt.Println("\tFull list of users:\n", sb.String(), "\n for channel", channel)
+			}
+			return
+		} else {
+			userids := getUsersIdsFrom(apiToken, emails)
+			fmt.Println("Listing channels the provided users are part of.")
+			for _, id := range userids {
+				fmt.Println("User", id, "is part of the following channels:")
+				channels, err := getAllChannelsForUser(apiToken, id, debug)
+				if err != nil {
+					os.Exit(1)
+				}
+				for _, v := range channels {
+					fmt.Println("\t", v)
+				}
 			}
 		}
-		for _, k := range keys {
-			fmt.Printf("\t • %-*s  --> %s\n", max+3, k, channelNameToIDMap[k])
-		}
+		fmt.Println("--list does not do any further action")
+		return
 	}
 
 	if emails == "" || channelsArg == "" || (action != actionAdd && action != actionRemove) {
 		if listChannels {
 			fmt.Println("Listing channels done, please use proper flags to perform actions.")
-			return
 		}
 		flag.Usage()
 		os.Exit(1)
@@ -136,21 +229,10 @@ func main() {
 
 	// lookup users by email
 	fmt.Printf("\nLooking up users ...\n")
-	var userIDs []string
-	for _, email := range strings.Split(emails, ",") {
-		userID, err := getUserID(apiToken, email)
-		if err != nil {
-			fmt.Printf("Error while looking up user with email %s: %s\n", email, err)
-			continue
-		}
-
-		fmt.Printf("Valid user (ID: %s) found for '%s'\n", userID, email)
-		userIDs = append(userIDs, userID)
-	}
-
-	if len(userIDs) == 0 {
+	userIDs := getUsersIdsFrom(apiToken, emails)
+	if (action == actionAdd || action == actionRemove) && len(userIDs) == 0 {
 		fmt.Println("\nNo users found - aborting")
-		return
+		os.Exit(1)
 	}
 
 	if debug {
@@ -160,10 +242,15 @@ func main() {
 	// invite/remove users to each channel
 	if action == actionAdd {
 		fmt.Printf("\nInviting users to channels ...\n")
-	} else {
+	} else if action == actionRemove {
 		fmt.Printf("\nRemoving users from channels ...\n")
+	} else {
+		fmt.Println("ERROR: invalid action / flag combination")
+		os.Exit(1)
 	}
+
 	channels := strings.Split(channelsArg, ",")
+
 	for _, channel := range channels {
 		channelID := channelNameToIDMap[channel]
 		if channelID == "" {
@@ -195,6 +282,47 @@ func main() {
 	fmt.Println("\nAll done! You're welcome =)")
 }
 
+func getUserName(apiToken, userID string) (string, string, error) {
+	httpClient := &http.Client{}
+
+	// lookup user by ID
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(usersLookupByIdURL+"?user=%s", userID), nil)
+	if err != nil {
+		return "", "", err
+	}
+
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", apiToken))
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		err := printErrorResponseBody(resp)
+		if err != nil {
+			return "", "", err
+		}
+		return "", "", fmt.Errorf("Non-200 status code (%d)", resp.StatusCode)
+	}
+
+	var data usersLookupResponse
+	err = json.NewDecoder(resp.Body).Decode(&data)
+	if err != nil {
+		return "", "", err
+	}
+
+	if !data.Ok {
+		fmt.Printf("usersLookupResponse: %+v\n", data)
+		return "", "", fmt.Errorf("Non-ok response while looking up user by email")
+	}
+
+	// return user Name
+	return data.User.Name, data.User.RealName, nil
+}
+
 func getUserID(apiToken, userEmail string) (string, error) {
 	httpClient := &http.Client{}
 
@@ -221,7 +349,7 @@ func getUserID(apiToken, userEmail string) (string, error) {
 		return "", fmt.Errorf("Non-200 status code (%d)", resp.StatusCode)
 	}
 
-	var data usersLookupByEmailResponse
+	var data usersLookupResponse
 	err = json.NewDecoder(resp.Body).Decode(&data)
 	if err != nil {
 		return "", err
@@ -236,11 +364,87 @@ func getUserID(apiToken, userEmail string) (string, error) {
 	return data.User.ID, nil
 }
 
+func getAllChannelsForUser(apiToken, userID string, debug bool) ([]string, error) {
+	memberof := sort.StringSlice{}
+	channels, err := getChannels(apiToken, true, debug)
+	if err != nil {
+		return nil, err
+	}
+	for cname, cid := range channels {
+		users, err := getUsersById(apiToken, cid, debug)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(users, userID) {
+			memberof = append(memberof, cname)
+		}
+	}
+	memberof.Sort()
+	return memberof, nil
+}
+
+func getUsersById(apiToken, channelID string, debug bool) ([]string, error) {
+	members := make([]string, 0, 50)
+	httpClient := &http.Client{}
+	var nextCursor string
+	for {
+		// query list of channels
+		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(conversationsUserListURL+"?cursor=%s&limit=200&channel=%s", nextCursor, channelID), nil)
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", apiToken))
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			err := printErrorResponseBody(resp)
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("Non-200 status code (%d)", resp.StatusCode)
+		}
+
+		var data conversationsMembersResponse
+		err = json.NewDecoder(resp.Body).Decode(&data)
+		if err != nil {
+			return nil, err
+		}
+
+		if !data.Ok {
+			fmt.Printf("conversationsMembersResponse: %+v", data)
+			return nil, fmt.Errorf("Non-ok response while querying list of users for channel '%s'", channelID)
+		}
+
+		if debug {
+			fmt.Printf("DEBUG: # of users returned in page: %d\n", len(data.Members))
+		}
+
+		// map of channel names to IDs
+		for _, user := range data.Members {
+			members = append(members, user)
+		}
+
+		// paginate if necessary
+		nextCursor = data.ResponseMetadata.NextCursor
+		if nextCursor == "" {
+			break
+		}
+	}
+
+	return members, nil
+}
 func getChannels(apiToken string, private bool, debug bool) (map[string]string, error) {
 
 	channelType := "public_channel"
 	if private {
-		channelType = "private_channel"
+		channelType = "private_channel,public_channel"
 	}
 
 	nameToID := make(map[string]string)
