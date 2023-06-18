@@ -1,4 +1,7 @@
 # slack-multi-channel-invite
+Thanks to all those that came before to help solve this for Peoplelogic!
+
+Old Readme:
 Have you ever googled `"slack invite user to multiple channels"`?  Yeah, me too.  I do this every time a new engineer joins my team, and I inevitably end up inviting said engineer to each Slack channel manually.  I got tired of this, so I rolled up my sleeves and whipped up this script.
 
 I assume Slack will eventually add this ability.  Until then, hopefully you can save some time by using this.
@@ -16,8 +19,8 @@ Enjoy!
     - `groups:write` (only if inviting to private channels)
 3. Install app to your workspace which will generate a new User OAuth token
 4. Download script:
-    - If you have Go installed: `go install github.com/jamietsao/slack-multi-channel-invite@latest`
-    - Else download the binary directly: https://github.com/jamietsao/slack-multi-channel-invite/releases
+    - If you have Go installed: `go install github.com/peoplelogic/slack-multi-channel-invite@latest`
+    - Else download the binary directly: https://github.com/peoplelogic/slack-multi-channel-invite/releases
 5. Run script:
 
 `slack-multi-channel-invite -api_token=<user-oauth-token> -emails=steph@warriors.com,klay@warriors.com -channels=dubnation,splashbrothers,thetown -private=<true|false> -list=<true|false>`
