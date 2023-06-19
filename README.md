@@ -20,7 +20,7 @@ Enjoy!
 3. Install app to your workspace which will generate a new User OAuth token
 4. [Install Go to your local machine](https://go.dev/doc/install)
 5. Download script:
-    - Download release from https://github.com/peoplelogic/slack-multi-channel-invite/releases
+    - Download release from [https://github.com/peoplelogic/slack-multi-channel-invite/releases](https://github.com/peoplelogic/slack-multi-channel-invite/releases/tag/release-0.1.0)
     - Unzip release to local directory
     - Change to the directory of the script
 6. Run script:
