@@ -18,12 +18,14 @@ Enjoy!
     - `groups:read` (only if inviting to private channels)
     - `groups:write` (only if inviting to private channels)
 3. Install app to your workspace which will generate a new User OAuth token
-4. Download script:
-    - If you have Go installed: `go install github.com/peoplelogic/slack-multi-channel-invite@latest`
-    - Else download the binary directly: https://github.com/peoplelogic/slack-multi-channel-invite/releases
-5. Run script:
+4. [Install Go to your local machine](https://go.dev/doc/install)
+5. Download script:
+    - Download release from https://github.com/peoplelogic/slack-multi-channel-invite/releases
+    - Unzip release to local directory
+    - Change to the directory of the script
+6. Run script:
 
-`slack-multi-channel-invite -api_token=<user-oauth-token> -emails=steph@warriors.com,klay@warriors.com -channels=dubnation,splashbrothers,thetown -private=<true|false> -list=<true|false>`
+`go run main.go -api_token=<user-oauth-token> -emails=steph@warriors.com,klay@warriors.com -channels=dubnation,splashbrothers,thetown -private=<true|false> -list=<true|false>`
 
 The users with emails `steph@warriors.com` and `klay@warriors.com` should be invited to channels `dubnation`, `splashbrothers`, and `thetown`!
 
@@ -34,7 +36,7 @@ _* The behaviour of the `list` flag set to `true` depends on whether the `emails
 #### Want to remove users from channels?
 Simply set the optional `action` flag to `remove` (`add` is the default):
 
-`slack-multi-channel-invite -api_token=<user-oauth-token> -action=remove -emails=kd@warriors.com -channels=dubnation,warriors -private=<true|false>`
+`go run main.go -api_token=<user-oauth-token> -action=remove -emails=kd@warriors.com -channels=dubnation,warriors -private=<true|false>`
 
 ## Using it with Github Actions
 
